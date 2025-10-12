@@ -74,7 +74,11 @@
 		<div class={`fixed inset-0 z-40 flex lg:hidden ${sidebarOpen ? '' : 'pointer-events-none'}`}>
 			<div
 				class={`absolute inset-0 bg-slate-900/40 transition-opacity ${sidebarOpen ? 'opacity-100' : 'opacity-0'}`}
+				role="presentation"
+				tabindex="-1"
+				aria-hidden="true"
 				on:click={closeSidebar}
+				on:keydown={(event) => event.key === 'Escape' && closeSidebar()}
 			></div>
 			<aside
 				class={`relative ml-auto flex w-72 flex-col border-l border-slate-200 bg-white px-6 py-8 shadow-2xl transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : 'translate-x-full'}`}

@@ -5,7 +5,7 @@ import {
 	jsonb,
 	numeric,
 	pgEnum,
-    pgTable,
+	pgTable,
 	serial,
 	text,
 	timestamp,
@@ -16,6 +16,18 @@ import {
 export const paymentMethodEnum = pgEnum('payment_method', ['cash', 'qris', 'debit', 'credit']);
 
 export const transactionStatusEnum = pgEnum('transaction_status', ['pending', 'completed', 'void']);
+
+export const savingTransactionTypeEnum = pgEnum('saving_transaction_type', ['deposit', 'withdraw']);
+
+export const loanStatusEnum = pgEnum('loan_status', ['active', 'closed', 'defaulted']);
+
+export const loanTransactionTypeEnum = pgEnum('loan_transaction_type', [
+	'disbursement',
+	'repayment',
+	'interest',
+	'penalty',
+	'adjustment'
+]);
 
 export const roles = pgTable('roles', {
 	id: serial('id').primaryKey(),
@@ -161,6 +173,70 @@ export const payments = pgTable(
 	})
 );
 
+export const savingsTransactions = pgTable(
+	'savings_transactions',
+	{
+		id: uuid('id').defaultRandom().primaryKey(),
+		customerId: uuid('customer_id')
+			.references(() => customers.id, { onDelete: 'cascade' })
+			.notNull(),
+		type: savingTransactionTypeEnum('type').notNull(),
+		amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
+		note: text('note'),
+		reference: text('reference'),
+		createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+	},
+	(table) => ({
+		savingsCustomerIdx: index('savings_transactions_customer_idx').on(table.customerId)
+	})
+);
+
+export const loanAccounts = pgTable(
+	'loan_accounts',
+	{
+		id: uuid('id').defaultRandom().primaryKey(),
+		customerId: uuid('customer_id')
+			.references(() => customers.id, { onDelete: 'cascade' })
+			.notNull(),
+		principal: numeric('principal', { precision: 12, scale: 2 }).notNull(),
+		balance: numeric('balance', { precision: 12, scale: 2 }).notNull(),
+		interestRate: numeric('interest_rate', { precision: 5, scale: 2 }).default(sql`0`).notNull(),
+		termMonths: integer('term_months'),
+		status: loanStatusEnum('status').default('active').notNull(),
+		issuedAt: timestamp('issued_at', { withTimezone: true }).defaultNow().notNull(),
+		dueDate: timestamp('due_date', { withTimezone: true }),
+		notes: text('notes'),
+		createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+		updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+	},
+	(table) => ({
+		loanCustomerIdx: index('loan_accounts_customer_idx').on(table.customerId),
+		loanStatusIdx: index('loan_accounts_status_idx').on(table.status)
+	})
+);
+
+export const loanTransactions = pgTable(
+	'loan_transactions',
+	{
+		id: uuid('id').defaultRandom().primaryKey(),
+		loanId: uuid('loan_id')
+			.references(() => loanAccounts.id, { onDelete: 'cascade' })
+			.notNull(),
+		type: loanTransactionTypeEnum('type').notNull(),
+		amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
+		note: text('note'),
+		reference: text('reference'),
+		createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+	},
+	(table) => ({
+		loanTransactionLoanIdx: index('loan_transactions_loan_idx').on(table.loanId),
+		loanTransactionTypeIdx: index('loan_transactions_type_idx').on(table.type)
+	})
+);
+
 export type Role = typeof roles.$inferSelect;
 export type NewRole = typeof roles.$inferInsert;
 
@@ -187,3 +263,12 @@ export type NewTransactionItem = typeof transactionItems.$inferInsert;
 
 export type Payment = typeof payments.$inferSelect;
 export type NewPayment = typeof payments.$inferInsert;
+
+export type SavingsTransaction = typeof savingsTransactions.$inferSelect;
+export type NewSavingsTransaction = typeof savingsTransactions.$inferInsert;
+
+export type LoanAccount = typeof loanAccounts.$inferSelect;
+export type NewLoanAccount = typeof loanAccounts.$inferInsert;
+
+export type LoanTransaction = typeof loanTransactions.$inferSelect;
+export type NewLoanTransaction = typeof loanTransactions.$inferInsert;

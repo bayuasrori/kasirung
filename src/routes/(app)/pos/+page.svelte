@@ -2,6 +2,7 @@
 	import {
 		Search,
 		ShoppingCart,
+		Download,
 		Minus,
 		Plus,
 		Trash2,
@@ -10,6 +11,8 @@
 		QrCode,
 		Users
 	} from 'lucide-svelte';
+
+	import { browser } from '$app/environment';
 
 	import Input from '$lib/components/ui/input.svelte';
 	import Button from '$lib/components/ui/button.svelte';
@@ -26,6 +29,7 @@
 		categories: Array<{ id: number; name: string }>;
 		customers: Array<{ id: string; name: string }>;
 		success: string | null;
+		receipt: string | null;
 		filters: { category: string };
 		form?: { form?: string; errors?: Record<string, string[]> } | null;
 	};
@@ -40,6 +44,9 @@
 	let taxRate = '0.1';
 	let note = '';
 	let cart: CartItem[] = [];
+	let receiptDownloaded = false;
+	let isDownloadingReceipt = false;
+	let receiptError: string | null = null;
 
 	const normalize = (value: string) => value.trim().toLowerCase();
 	let filteredProducts = data.products;
@@ -87,6 +94,49 @@
 		cart = [...cart];
 	}
 
+	async function downloadReceipt(transactionId: string) {
+		if (!browser || !transactionId) {
+			return;
+		}
+
+		try {
+			isDownloadingReceipt = true;
+			receiptError = null;
+			const response = await fetch(`/pos/receipt/${transactionId}`);
+			if (!response.ok) {
+				throw new Error('Failed to download receipt');
+			}
+			const blob = await response.blob();
+			const disposition = response.headers.get('Content-Disposition');
+			let filename = `kwitansi-${transactionId}.pdf`;
+			if (disposition) {
+				const match = disposition.match(/filename="?([^";]+)"?/i);
+				if (match?.[1]) {
+					filename = match[1];
+				}
+			}
+			const url = URL.createObjectURL(blob);
+			const anchor = document.createElement('a');
+			anchor.href = url;
+			anchor.download = filename;
+			anchor.style.display = 'none';
+			document.body.appendChild(anchor);
+			anchor.click();
+			document.body.removeChild(anchor);
+			URL.revokeObjectURL(url);
+		} catch (error) {
+			console.error(error);
+			receiptError = 'Gagal mengunduh kwitansi. Silakan coba lagi.';
+		} finally {
+			isDownloadingReceipt = false;
+		}
+	}
+
+	$: if (browser && data.receipt && !receiptDownloaded) {
+		receiptDownloaded = true;
+		downloadReceipt(data.receipt);
+	}
+
 	const formatCurrency = (value: number) => `Rp ${value.toLocaleString('id-ID', { maximumFractionDigits: 0 })}`;
 
 $: subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -114,9 +164,24 @@ $: grandTotal = Math.max(subtotal + taxAmount - discount, 0);
 
 <div class="space-y-6">
 	{#if data.success}
-		<div class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-			Transaksi <span class="font-semibold">{data.success}</span> berhasil disimpan.
+		<div class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 sm:flex sm:items-center sm:justify-between">
+			<span>Transaksi <span class="font-semibold">{data.success}</span> berhasil disimpan.</span>
+			{#if data.receipt}
+				<Button
+					type="button"
+					variant="outline"
+					className="mt-3 inline-flex items-center gap-2 border-emerald-300 text-emerald-700 hover:bg-emerald-100 sm:mt-0"
+					on:click={() => downloadReceipt(data.receipt!)}
+					disabled={isDownloadingReceipt}
+				>
+					<Download class={`h-4 w-4 ${isDownloadingReceipt ? 'animate-pulse' : ''}`} />
+					{isDownloadingReceipt ? 'Mengunduh…' : 'Download kwitansi'}
+				</Button>
+			{/if}
 		</div>
+		{#if receiptError}
+			<p class="mt-2 text-sm text-red-500">{receiptError}</p>
+		{/if}
 	{/if}
 
 	<section class="grid gap-6 xl:grid-cols-[2fr_1fr]">

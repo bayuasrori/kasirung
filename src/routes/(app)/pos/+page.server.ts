@@ -9,6 +9,7 @@ import { listQuickCustomers } from '$lib/server/services/customers.service';
 export const load: PageServerLoad = async ({ url }) => {
 	const categoryParam = url.searchParams.get('category');
 	const success = url.searchParams.get('success');
+	const receipt = url.searchParams.get('receipt');
 	let categoryId: number | null | undefined;
 	if (!categoryParam) {
 		categoryId = undefined;
@@ -30,6 +31,7 @@ export const load: PageServerLoad = async ({ url }) => {
 		categories,
 		customers,
 		success,
+		receipt,
 		filters: { category: categoryParam ?? '' }
 	};
 };
@@ -63,9 +65,8 @@ export const actions: Actions = {
 		}
 
 		const params = new URLSearchParams(url.searchParams);
-		params.delete('success');
-		const query = params.toString();
-		const suffix = query ? `&${query}` : '';
-		throw redirect(303, `/pos?success=${result.transactionNumber}${suffix}`);
+		params.set('success', result.transactionNumber);
+		params.set('receipt', result.transactionId);
+		throw redirect(303, `/pos?${params.toString()}`);
 	}
 };

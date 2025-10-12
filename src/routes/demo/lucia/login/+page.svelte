@@ -2,7 +2,7 @@
 	import { enhance } from '$app/forms';
 	import type { ActionData } from './$types';
 
-	export let form: ActionData = undefined;
+	export let form: ActionData | null = null;
 </script>
 
 <h1>Login/Register</h1>

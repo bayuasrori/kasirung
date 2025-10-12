@@ -68,6 +68,7 @@
 		"lucia-auth": "^1.8.0",
 		"lucide-svelte": "^0.470.0",
 		"motion": "^11.11.21",
+		"pdf-lib": "^1.17.1",
 		"postgres": "^3.4.7",
 		"tailwind-merge": "^2.5.3",
 		"zod": "^3.23.8"

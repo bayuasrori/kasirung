@@ -8,10 +8,22 @@
 			open = false;
 		}
 	}
+
+	function handleBackdropKeydown(event: KeyboardEvent) {
+		if (event.key === 'Escape') {
+			open = false;
+		}
+	}
 </script>
 
 {#if open}
-	<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4" on:click={handleBackdropClick}>
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4"
+		role="presentation"
+		tabindex="-1"
+		on:click={handleBackdropClick}
+		on:keydown={handleBackdropKeydown}
+	>
 		<div class="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
 			{#if title}
 				<h3 class="text-lg font-semibold text-slate-900">{title}</h3>

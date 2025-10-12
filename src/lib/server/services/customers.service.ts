@@ -30,7 +30,6 @@ export async function listCustomersWithMeta(params: ListParams) {
 	const pageSize = params.pageSize ?? 10;
 	const page = Math.max(params.page ?? 1, 1);
 	const offset = (page - 1) * pageSize;
-
 	const { data, total } = await findCustomers({
 		search: params.search,
 		limit: pageSize,
@@ -39,8 +38,14 @@ export async function listCustomersWithMeta(params: ListParams) {
 		sortDir: params.sortDir
 	});
 
+	const normalizedItems = data.map((item) => ({
+		...item,
+		totalSpentThisMonth: Number(item.totalSpentThisMonth ?? 0),
+		outstandingThisMonth: Number(item.outstandingThisMonth ?? 0)
+	}));
+
 	return {
-		items: data,
+		items: normalizedItems,
 		total,
 		page,
 		pageSize,

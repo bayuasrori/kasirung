@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, ilike, or, sql } from 'drizzle-orm';
 
 import { db } from '$lib/db/client';
-import { customers, transactions } from '$lib/db/schema';
+import { customers, transactions, payments } from '$lib/db/schema';
 
 type SortKey = 'createdAt' | 'name';
 
@@ -41,10 +41,13 @@ export async function findCustomers(params: FindCustomersParams) {
 			notes: customers.notes,
 			createdAt: customers.createdAt,
 			updatedAt: customers.updatedAt,
-			transactionCount: sql<number>`count(${transactions.id})`
+			transactionCount: sql<number>`count(${transactions.id})`,
+			totalSpentThisMonth: sql<string>`coalesce(sum(${transactions.total}) filter (where date_trunc('month', ${transactions.createdAt}) = date_trunc('month', now())), 0)`,
+				outstandingThisMonth: sql<string>`coalesce(sum(${payments.amount}) filter (where date_trunc('month', ${transactions.createdAt}) = date_trunc('month', now()) and ${payments.method} = 'credit' and ${payments.amount} > 0), 0)`
 		})
 		.from(customers)
 		.leftJoin(transactions, eq(transactions.customerId, customers.id))
+		.leftJoin(payments, eq(payments.transactionId, transactions.id))
 		.where(whereClause)
 		.groupBy(customers.id)
 		.orderBy(order)

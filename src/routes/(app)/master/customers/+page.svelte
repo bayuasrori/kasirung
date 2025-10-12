@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { Plus, Pencil, Trash2, Filter, Mail, Phone, MapPin } from 'lucide-svelte';
+	import { Plus, Pencil, Trash2, Filter, Mail, Phone, MapPin, BookOpen } from 'lucide-svelte';
 
 	import Button from '$lib/components/ui/button.svelte';
 	import Input from '$lib/components/ui/input.svelte';
@@ -18,6 +18,8 @@
 			address: string | null;
 			notes: string | null;
 			transactionCount: number;
+			totalSpentThisMonth: number;
+			outstandingThisMonth: number;
 			createdAt: Date;
 		}>;
 		total: number;
@@ -43,6 +45,9 @@
 		if (form.form === 'create' && form.errors) showCreateModal = true;
 		if (form.form === 'update' && form.errors) showEditModal = true;
 	});
+
+	const formatCurrency = (value: number | string) =>
+		`Rp ${Number(value ?? 0).toLocaleString('id-ID', { maximumFractionDigits: 0 })}`;
 
 	function openCreate() {
 		showCreateModal = true;
@@ -100,15 +105,17 @@
 
 	<div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
 		<table class="min-w-full divide-y divide-slate-200 text-sm">
-			<thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-				<tr>
-					<th class="px-4 py-3">Pelanggan</th>
-					<th class="px-4 py-3">Kontak</th>
-					<th class="px-4 py-3 text-center">Transaksi</th>
-					<th class="px-4 py-3 text-right">Aksi</th>
-				</tr>
-			</thead>
-			<tbody class="divide-y divide-slate-100">
+		<thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+			<tr>
+				<th class="px-4 py-3">Pelanggan</th>
+				<th class="px-4 py-3">Kontak</th>
+				<th class="px-4 py-3 text-center">Transaksi</th>
+				<th class="px-4 py-3 text-right">Total Belanja (Bulan Ini)</th>
+				<th class="px-4 py-3 text-right">Total Hutang (Bulan Ini)</th>
+				<th class="px-4 py-3 text-right">Aksi</th>
+			</tr>
+		</thead>
+		<tbody class="divide-y divide-slate-100">
 				{#if data.customers.length}
 					{#each data.customers as customer}
 						<tr class="hover:bg-blue-50/40">
@@ -132,14 +139,32 @@
 									<p class="text-xs text-slate-400">Belum ada kontak.</p>
 								{/if}
 							</td>
-							<td class="px-4 py-3 text-center">
-								<Badge variant="muted">{customer.transactionCount} trx</Badge>
-							</td>
-							<td class="px-4 py-3 text-right">
-								<div class="flex justify-end gap-2">
-									<Button variant="ghost" size="sm" className="text-blue-600" on:click={() => openEdit(customer)}>
-										<Pencil class="h-4 w-4" />
-									</Button>
+						<td class="px-4 py-3 text-center">
+							<Badge variant="muted">{customer.transactionCount} trx</Badge>
+						</td>
+						<td class="px-4 py-3 text-right font-medium text-slate-900">
+							{formatCurrency(customer.totalSpentThisMonth)}
+						</td>
+						<td
+							class="px-4 py-3 text-right font-medium"
+							class:text-amber-600={customer.outstandingThisMonth > 0}
+							class:text-slate-500={customer.outstandingThisMonth === 0}
+						>
+							{formatCurrency(customer.outstandingThisMonth)}
+						</td>
+						<td class="px-4 py-3 text-right">
+							<div class="flex justify-end gap-2">
+								<Button
+									variant="ghost"
+									size="sm"
+									className="text-slate-600"
+									href={`/master/customers/${customer.id}`}
+								>
+									<BookOpen class="h-4 w-4" />
+								</Button>
+								<Button variant="ghost" size="sm" className="text-blue-600" on:click={() => openEdit(customer)}>
+									<Pencil class="h-4 w-4" />
+								</Button>
 									<Button variant="ghost" size="sm" className="text-red-500" on:click={() => openDelete(customer)}>
 										<Trash2 class="h-4 w-4" />
 									</Button>
@@ -149,7 +174,7 @@
 					{/each}
 				{:else}
 					<tr>
-						<td colspan="4" class="px-4 py-8 text-center text-sm text-slate-500">Belum ada pelanggan yang terdaftar.</td>
+						<td colspan="6" class="px-4 py-8 text-center text-sm text-slate-500">Belum ada pelanggan yang terdaftar.</td>
 					</tr>
 				{/if}
 			</tbody>

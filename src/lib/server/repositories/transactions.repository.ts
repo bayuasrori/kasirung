@@ -98,6 +98,171 @@ export async function findTransactionById(id: string) {
 	return transaction ?? null;
 }
 
+export async function findTransactionForReceipt(id: string) {
+	const [transaction] = await db
+		.select({
+			id: transactions.id,
+			number: transactions.number,
+			createdAt: transactions.createdAt,
+			subtotal: transactions.subtotal,
+			tax: transactions.tax,
+			discount: transactions.discount,
+			total: transactions.total,
+			note: transactions.note,
+			cashier: users.fullName,
+			customer: customers.name
+		})
+		.from(transactions)
+		.leftJoin(users, eq(users.id, transactions.userId))
+		.leftJoin(customers, eq(customers.id, transactions.customerId))
+		.where(eq(transactions.id, id))
+		.limit(1);
+
+	if (!transaction) {
+		return null;
+	}
+
+	const items = await db
+		.select({
+			productId: products.id,
+			name: products.name,
+			sku: products.sku,
+			quantity: transactionItems.quantity,
+			unitPrice: transactionItems.unitPrice,
+			totalPrice: transactionItems.totalPrice
+		})
+		.from(transactionItems)
+		.innerJoin(products, eq(products.id, transactionItems.productId))
+		.where(eq(transactionItems.transactionId, id))
+		.orderBy(asc(transactionItems.createdAt));
+
+	return {
+		...transaction,
+		items
+	};
+}
+
+interface CustomerLedgerParams {
+	customerId: string;
+	limit: number;
+	offset: number;
+	startDate?: Date;
+	endDate?: Date;
+	paymentStatus?: 'all' | 'paid' | 'pending';
+}
+
+const buildCustomerLedgerWhere = (params: CustomerLedgerParams) => {
+	const { customerId, startDate, endDate, paymentStatus } = params;
+	const conditions: Array<any> = [eq(transactions.customerId, customerId)];
+
+	if (startDate) {
+		conditions.push(gte(transactions.createdAt, startDate));
+	}
+
+	if (endDate) {
+		conditions.push(lte(transactions.createdAt, endDate));
+	}
+
+
+	const creditOutstandingCondition = sql`${payments.method} = 'credit' AND ${payments.amount} > 0`;
+
+	if (paymentStatus === 'paid') {
+		conditions.push(sql`NOT (${creditOutstandingCondition})`);
+	} else if (paymentStatus === 'pending') {
+		conditions.push(creditOutstandingCondition);
+	}
+
+	return conditions.length === 1
+		? conditions[0]
+		: and(...(conditions as [any, ...any[]]));
+};
+
+export async function findCustomerTransactions(params: CustomerLedgerParams) {
+	const whereClause = buildCustomerLedgerWhere(params);
+
+	const data = await db
+		.select({
+			id: transactions.id,
+			number: transactions.number,
+			createdAt: transactions.createdAt,
+			subtotal: transactions.subtotal,
+			tax: transactions.tax,
+			discount: transactions.discount,
+			total: transactions.total,
+			status: transactions.status,
+			paymentStatus: payments.status,
+			paymentMethod: payments.method,
+			paymentAmount: payments.amount,
+			cashier: users.fullName
+		})
+		.from(transactions)
+		.innerJoin(payments, eq(payments.transactionId, transactions.id))
+		.leftJoin(users, eq(users.id, transactions.userId))
+		.where(whereClause)
+		.orderBy(desc(transactions.createdAt))
+		.limit(params.limit)
+		.offset(params.offset);
+
+	const [{ count }] = await db
+		.select({ count: sql<number>`count(*)` })
+		.from(transactions)
+		.innerJoin(payments, eq(payments.transactionId, transactions.id))
+		.where(whereClause);
+
+	return { data, total: Number(count ?? 0) };
+}
+
+export async function getCustomerLedgerSummary(params: CustomerLedgerParams) {
+	const whereClause = buildCustomerLedgerWhere(params);
+
+	const [row] = await db
+		.select({
+			totalTransactions: sql<number>`count(*)`,
+			totalAmount: sql<string>`coalesce(sum(${transactions.total}), 0)`,
+			pendingAmount: sql<string>`coalesce(sum(case when ${payments.method} = 'credit' and ${payments.amount} > 0 then ${payments.amount} else 0 end), 0)`,
+			pendingCount: sql<number>`coalesce(sum(case when ${payments.method} = 'credit' and ${payments.amount} > 0 then 1 else 0 end), 0)`,
+			lastTransactionAt: sql<Date | null>`max(${transactions.createdAt})`
+		})
+		.from(transactions)
+		.innerJoin(payments, eq(payments.transactionId, transactions.id))
+		.where(whereClause);
+
+	const latest = row?.lastTransactionAt ?? null;
+
+	return {
+		totalTransactions: Number(row?.totalTransactions ?? 0),
+		totalAmount: Number(row?.totalAmount ?? 0),
+		pendingAmount: Number(row?.pendingAmount ?? 0),
+		pendingCount: Number(row?.pendingCount ?? 0),
+		lastTransactionAt: latest
+	};
+}
+
+export async function listCustomerOutstandingTransactions(customerId: string) {
+	const rows = await db
+		.select({
+			id: transactions.id,
+			number: transactions.number,
+			createdAt: transactions.createdAt,
+			total: transactions.total,
+			status: transactions.status,
+			paymentStatus: payments.status,
+			paymentAmount: payments.amount
+		})
+		.from(transactions)
+		.innerJoin(payments, eq(payments.transactionId, transactions.id))
+		.where(
+			and(
+				eq(transactions.customerId, customerId),
+				eq(payments.method, 'credit'),
+				sql`${payments.amount} > 0`
+			)
+		)
+		.orderBy(desc(transactions.createdAt));
+
+	return rows;
+}
+
 export async function deleteTransactionCascade(id: string) {
 	return db.transaction(async (tx) => {
 		await tx.delete(transactionItems).where(eq(transactionItems.transactionId, id));

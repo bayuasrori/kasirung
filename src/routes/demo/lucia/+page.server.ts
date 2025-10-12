@@ -1,31 +1,35 @@
-import * as auth from '$lib/server/auth';
+import { auth } from '$lib/server/auth';
 import { fail, redirect } from '@sveltejs/kit';
-import { getRequestEvent } from '$app/server';
 import type { Actions, PageServerLoad } from './$types';
 
-export const load: PageServerLoad = async () => {
-	const user = requireLogin();
-	return { user };
+export const load: PageServerLoad = async ({ locals }) => {
+	if (!locals.user || !locals.session) {
+		throw redirect(302, '/demo/lucia/login');
+	}
+
+	return { user: locals.user };
 };
 
 export const actions: Actions = {
 	logout: async (event) => {
 		if (!event.locals.session) {
-			return fail(401);
+			return fail(401, { message: 'Session tidak ditemukan' });
 		}
-		await auth.invalidateSession(event.locals.session.id);
-		auth.deleteSessionTokenCookie(event);
 
-		return redirect(302, '/demo/lucia/login');
+		await auth.invalidateSession(event.locals.session.id);
+		const blankCookie = auth.createBlankSessionCookie();
+		event.cookies.set(blankCookie.name, blankCookie.value, {
+			path: blankCookie.attributes.path ?? '/',
+			domain: blankCookie.attributes.domain,
+			httpOnly: blankCookie.attributes.httpOnly ?? true,
+			sameSite: blankCookie.attributes.sameSite ?? 'lax',
+			secure: blankCookie.attributes.secure ?? true,
+			expires: blankCookie.attributes.expires,
+			maxAge: blankCookie.attributes.maxAge
+		});
+		event.locals.session = null;
+		event.locals.user = null;
+
+		throw redirect(302, '/demo/lucia/login');
 	}
 };
-
-function requireLogin() {
-	const { locals } = getRequestEvent();
-
-	if (!locals.user) {
-		return redirect(302, '/demo/lucia/login');
-	}
-
-	return locals.user;
-}

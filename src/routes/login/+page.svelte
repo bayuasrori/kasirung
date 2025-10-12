@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
-	import { animate, stagger } from 'motion';
+	import { animate } from 'motion';
 	import { page } from '$app/stores';
 	import { Mail, Lock, LogIn } from 'lucide-svelte';
 
@@ -27,12 +27,15 @@
 	let unsubscribe: (() => void) | null = null;
 
 	onMount(() => {
-		const elements = document.querySelectorAll('[data-animate]');
-		animate(
-			elements,
-			{ opacity: [0, 1], y: [20, 0] },
-			{ delay: stagger(0.08), duration: 0.5, easing: 'ease-out' }
-		);
+		const elements = document.querySelectorAll<HTMLElement>('[data-animate]');
+		const easeOut = { duration: 0.5, easing: 'ease-out' } as const;
+		Array.from(elements).forEach((element, index) => {
+			animate(
+				element,
+				{ opacity: [0, 1], y: [20, 0] },
+				{ ...easeOut, delay: index * 0.08 }
+			);
+		});
 
 		unsubscribe = page.subscribe(() => {
 			isSubmitting = false;

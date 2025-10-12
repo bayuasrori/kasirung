@@ -29,8 +29,8 @@
 		}
 	);
 
-	export type ButtonVariant = VariantProps<typeof buttonVariants>['variant'];
-	export type ButtonSize = VariantProps<typeof buttonVariants>['size'];
+type ButtonVariant = VariantProps<typeof buttonVariants>['variant'];
+type ButtonSize = VariantProps<typeof buttonVariants>['size'];
 
 	export let variant: ButtonVariant = 'default';
 	export let size: ButtonSize = 'default';

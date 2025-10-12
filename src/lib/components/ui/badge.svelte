@@ -15,7 +15,7 @@
 		defaultVariants: { variant: 'default' }
 	});
 
-	export type BadgeVariant = VariantProps<typeof badgeVariants>['variant'];
+	type BadgeVariant = VariantProps<typeof badgeVariants>['variant'];
 
 	export let variant: BadgeVariant = 'default';
 	export let className = '';

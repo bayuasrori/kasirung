@@ -5,8 +5,12 @@
 	export let data: PageServerData;
 </script>
 
-<h1>Hi, {data.user.username}!</h1>
-<p>Your user ID is {data.user.id}.</p>
+{#if data.user}
+	<h1>Hi, {data.user.fullName ?? data.user.email}!</h1>
+	<p>User ID: {data.user.id}</p>
+{:else}
+	<p class="text-sm text-slate-600">Anda belum masuk.</p>
+{/if}
 <form method="post" action="?/logout" use:enhance>
 	<button>Sign out</button>
 </form>

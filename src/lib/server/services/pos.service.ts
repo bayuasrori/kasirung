@@ -106,7 +106,7 @@ export async function createPosTransaction(userId: string, payload: Record<strin
 		transactionId,
 		amount: formatMoney(total),
 		method: cart.paymentMethod,
-		status: 'paid',
+		status: cart.paymentMethod === 'credit' ? 'pending' : 'paid',
 		paidAt: now,
 		createdAt: now,
 		updatedAt: now,
