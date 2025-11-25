@@ -1,28 +1,34 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
-import { findRoleById } from '$lib/server/repositories/roles.repository';
 import { createRole, deleteRoleById, listRolesWithMeta, updateRoleById } from '$lib/server/services/roles.service';
 import { MENU_PERMISSION_SECTIONS } from '$lib/navigation/menus';
 
 function preserveQuery(url: URL) {
-	const params = new URLSearchParams(url.searchParams);
-	return params.size ? `?${params.toString()}` : '';
+	const params = new URLSearchParams();
+	url.searchParams.forEach((value, key) => {
+		if (!key || key.startsWith('/')) {
+			return;
+		}
+		params.append(key, value);
+	});
+	const query = params.toString();
+	return query ? `?${query}` : '';
 }
 
-async function ensureAdmin(locals: App.Locals) {
+function ensureRoleManagementAccess(locals: App.Locals) {
 	if (!locals.session || !locals.user) {
 		throw redirect(302, '/login');
 	}
 
-	const role = await findRoleById(locals.user.roleId);
-	if (!role || role.name !== 'admin') {
+	const allowedMenus = locals.allowedMenus ?? [];
+	if (!allowedMenus.includes('management.roles')) {
 		throw redirect(302, '/dashboard');
 	}
 }
 
 export const load: PageServerLoad = async ({ url, locals }) => {
-	await ensureAdmin(locals);
+	ensureRoleManagementAccess(locals);
 
 	const search = url.searchParams.get('search') ?? '';
 	const page = Number(url.searchParams.get('page') ?? '1');
@@ -49,7 +55,7 @@ export const load: PageServerLoad = async ({ url, locals }) => {
 
 export const actions: Actions = {
 	create: async ({ request, url, locals }) => {
-		await ensureAdmin(locals);
+		ensureRoleManagementAccess(locals);
 		const formData = await request.formData();
 		const permissions = formData.getAll('permissions').map(String);
 		const formEntries = Object.fromEntries(formData);
@@ -61,7 +67,7 @@ export const actions: Actions = {
 		throw redirect(303, `/manajemen/roles${preserveQuery(url)}`);
 	},
 	update: async ({ request, url, locals }) => {
-		await ensureAdmin(locals);
+		ensureRoleManagementAccess(locals);
 		const formData = await request.formData();
 		const id = formData.get('id');
 		if (!id || typeof id !== 'string') {
@@ -80,7 +86,7 @@ export const actions: Actions = {
 		throw redirect(303, `/manajemen/roles${preserveQuery(url)}`);
 	},
 	delete: async ({ request, url, locals }) => {
-		await ensureAdmin(locals);
+		ensureRoleManagementAccess(locals);
 		const formData = await request.formData();
 		const id = formData.get('id');
 		if (!id || typeof id !== 'string') {

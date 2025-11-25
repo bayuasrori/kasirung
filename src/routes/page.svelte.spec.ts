@@ -1,25 +1,12 @@
-import { page } from '@vitest/browser/context';
+import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
-import { render } from 'vitest-browser-svelte';
-
-const globalWithVite = globalThis as typeof globalThis & {
-	__vite?: { wrapDynamicImport?: <T>(promise: Promise<T>) => Promise<T> };
-};
-
-if (!globalWithVite.__vite) {
-	globalWithVite.__vite = {};
-}
-
-if (typeof globalWithVite.__vite.wrapDynamicImport !== 'function') {
-	globalWithVite.__vite.wrapDynamicImport = <T>(promise: Promise<T>) => promise;
-}
+import Page from './+page.svelte';
 
 describe('/+page.svelte', () => {
-	it('should render h1', async () => {
-		const { default: Page } = await import('./+page.svelte');
+	it('renders the hero heading', () => {
 		render(Page);
 
-		const heading = page.getByRole('heading', { level: 1 });
-		await expect.element(heading).toBeInTheDocument();
+		const heading = screen.getByRole('heading', { level: 1 });
+		expect(heading).toBeInstanceOf(HTMLElement);
 	});
 });

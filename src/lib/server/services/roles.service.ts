@@ -28,11 +28,7 @@ const roleInputSchema = z.object({
 			path: ['description']
 		})
 		.optional(),
-	permissions: z
-		.array(menuKeyEnum, {
-			invalid_type_error: 'Format menu tidak valid'
-		})
-		.min(1, 'Minimal pilih satu menu yang dapat diakses')
+	permissions: z.array(menuKeyEnum).min(1, 'Minimal pilih satu menu yang dapat diakses')
 });
 
 const roleUpdateSchema = roleInputSchema.partial();

@@ -1,10 +1,15 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID } from 'crypto';
 import { z } from 'zod';
 
 import { createTransactionRecord } from '$lib/server/repositories/transactions.repository';
 import { findProductsByIds } from '$lib/server/repositories/products.repository';
 import { findCustomerById } from '$lib/server/repositories/customers.repository';
+import { getPenghuniAktifDetail } from '$lib/server/services/kosan-penghuni.service';
 import { db } from '$lib/db/client';
+import {
+	LedgerConfigurationError,
+	recordPosSaleJournal
+} from '$lib/server/services/accounting.service';
 
 const cartSchema = z.object({
 	items: z
@@ -16,9 +21,8 @@ const cartSchema = z.object({
 		)
 		.min(1, 'Keranjang tidak boleh kosong'),
 	paymentMethod: z.enum(['cash', 'qris', 'debit', 'credit']),
-	customerId: z
-		.union([z.string().uuid('Pelanggan tidak valid'), z.literal(''), z.null()])
-		.optional(),
+	customerId: z.union([z.string().uuid('Pelanggan tidak valid'), z.literal(''), z.null()]).optional(),
+	tenantId: z.union([z.string().uuid('Penghuni tidak valid'), z.literal(''), z.null()]).optional(),
 	taxRate: z.coerce.number().min(0).max(1).optional(),
 	discount: z.coerce.number().min(0).optional(),
 	note: z.string().optional()
@@ -74,7 +78,28 @@ export async function createPosTransaction(userId: string, payload: Record<strin
 	const taxAmount = subtotal * taxRate;
 	const total = subtotal + taxAmount - discount;
 
-	const customerId = cart.customerId ? cart.customerId : null;
+	let customerId = cart.customerId ? cart.customerId : null;
+	const tenantId = cart.tenantId ? cart.tenantId : null;
+	let tenantMetadata: Record<string, unknown> | null = null;
+
+	if (tenantId) {
+		const tenant = await getPenghuniAktifDetail(tenantId);
+		if (!tenant) {
+			return { success: false, errors: { tenantId: ['Penghuni tidak ditemukan atau tidak aktif'] } } as const;
+		}
+		if (customerId && tenant.pelangganId !== customerId) {
+			return { success: false, errors: { customerId: ['Pelanggan tidak sesuai dengan penghuni'] } } as const;
+		}
+		customerId = tenant.pelangganId;
+		tenantMetadata = {
+			id: tenant.id,
+			gedungId: tenant.gedungId,
+			gedungNama: tenant.gedungNama,
+			ruanganId: tenant.ruanganId,
+			ruanganNama: tenant.ruanganNama
+		};
+	}
+
 	if (customerId) {
 		const customer = await findCustomerById(customerId);
 		if (!customer) {
@@ -110,7 +135,7 @@ export async function createPosTransaction(userId: string, payload: Record<strin
 		paidAt: now,
 		createdAt: now,
 		updatedAt: now,
-		metadata: null,
+		metadata: tenantMetadata ? { tenant: tenantMetadata } : null,
 		reference: null
 	};
 
@@ -119,7 +144,28 @@ export async function createPosTransaction(userId: string, payload: Record<strin
 		transactionId
 	}));
 
-	await createTransactionRecord(db, transactionValues, itemsToInsert, paymentValues);
+	try {
+		await createTransactionRecord(db, transactionValues, itemsToInsert, paymentValues, {
+			afterInsert: async (tx) => {
+				await recordPosSaleJournal(tx, {
+					subtotal,
+					discount,
+					tax: taxAmount,
+					total,
+					paymentMethod: cart.paymentMethod,
+					entryDate: now,
+					reference: transactionId,
+					number: transactionNumber,
+					createdBy: userId
+				});
+			}
+		});
+	} catch (error) {
+		if (error instanceof LedgerConfigurationError) {
+			return { success: false, errors: { root: [error.message] } } as const;
+		}
+		throw error;
+	}
 
 	return {
 		success: true,

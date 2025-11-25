@@ -1,12 +1,16 @@
+import type { MenuKey } from '$lib/navigation/menus';
+
 declare global {
 	namespace App {
 		interface Locals {
 			session: import('lucia').Session | null;
 			user: import('lucia').User | null;
+			allowedMenus: MenuKey[];
 		}
 		interface PageData {
 			session: import('lucia').Session | null;
 			user: import('lucia').User | null;
+			allowedMenus?: MenuKey[];
 		}
 	}
 }

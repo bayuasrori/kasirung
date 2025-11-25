@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID } from 'crypto';
 import { hash } from '@node-rs/argon2';
 import { z } from 'zod';
 
@@ -31,7 +31,7 @@ const createUserSchema = z.object({
 	fullName: z.string().trim().min(3, 'Nama lengkap minimal 3 karakter').max(160, 'Nama lengkap maksimal 160 karakter'),
 	email: z.string().trim().email('Format email tidak valid'),
 	password: z.string().min(8, 'Kata sandi minimal 8 karakter'),
-	roleId: z.coerce.number({ invalid_type_error: 'Role tidak valid' }).int('Role tidak valid'),
+	roleId: z.coerce.number().int('Role tidak valid'),
 	isActive: booleanInput.optional(),
 	avatarUrl: z.string().trim().optional()
 });
@@ -39,12 +39,7 @@ const createUserSchema = z.object({
 const updateUserSchema = z.object({
 	fullName: z.string().trim().min(3, 'Nama lengkap minimal 3 karakter').max(160, 'Nama lengkap maksimal 160 karakter').optional(),
 	email: z.string().trim().email('Format email tidak valid').optional(),
-	roleId: z
-		.union([
-			z.literal(''),
-			z.coerce.number({ invalid_type_error: 'Role tidak valid' }).int('Role tidak valid')
-		])
-		.optional(),
+	roleId: z.union([z.literal(''), z.coerce.number().int('Role tidak valid')]).optional(),
 	isActive: booleanInput.optional(),
 	avatarUrl: z.string().trim().optional()
 });

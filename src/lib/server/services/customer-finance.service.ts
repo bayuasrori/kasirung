@@ -10,8 +10,36 @@ import {
 	listSavingsTransactionsByCustomer
 } from '$lib/server/repositories/customer-finance.repository';
 import { and, eq } from 'drizzle-orm';
+import {
+	LedgerConfigurationError,
+	recordLoanDisbursementJournal,
+	recordLoanRepaymentFromSavingsJournal,
+	recordLoanRepaymentJournal,
+	recordSavingsJournal,
+	recordSavingsToReceivableJournal
+} from '$lib/server/services/accounting.service';
 
 const toNumber = (value: unknown) => Number(value ?? 0);
+const toCurrency = (value: number) => Number(value.toFixed(2));
+
+const computeLoanPosition = (loan: { principal: unknown; totalPaid?: unknown; interestAccrued?: unknown }) => {
+	const principal = Math.max(0, toNumber(loan.principal));
+	const accruedInterest = Math.max(0, toNumber(loan.interestAccrued ?? 0));
+	const rawRepayments = Math.max(0, toNumber(loan.totalPaid ?? 0));
+	const cappedRepayments = Math.min(rawRepayments, principal + accruedInterest);
+	const interestPaid = Math.min(cappedRepayments, accruedInterest);
+	const principalPaid = Math.min(principal, Math.max(0, cappedRepayments - interestPaid));
+	const principalOutstanding = toCurrency(Math.max(0, principal - principalPaid));
+	const interestOutstanding = toCurrency(Math.max(0, accruedInterest - interestPaid));
+	const totalOutstanding = toCurrency(principalOutstanding + interestOutstanding);
+	return {
+		principalOutstanding,
+		interestOutstanding,
+		totalOutstanding,
+		totalPaid: toCurrency(cappedRepayments),
+		accruedInterest: toCurrency(accruedInterest)
+	};
+};
 
 const savingsTransactionSchema = z.object({
 	type: z.enum(['deposit', 'withdraw']),
@@ -123,19 +151,25 @@ export async function getCustomerFinance(customerId: string) {
 		}))
 	};
 
-	const loans = loanAccountsRows.map((loan) => ({
-		id: loan.id,
-		principal: toNumber(loan.principal),
-		balance: toNumber(loan.balance),
-		interestRate: toNumber(loan.interestRate),
-		termMonths: loan.termMonths ?? null,
-		status: loan.status,
-		issuedAt: loan.issuedAt,
-		dueDate: loan.dueDate,
-		notes: loan.notes,
-		createdAt: loan.createdAt,
-		totalPaid: toNumber(loan.totalPaid)
-	}));
+	const loans = loanAccountsRows.map((loan) => {
+		const position = computeLoanPosition(loan);
+		return {
+			id: loan.id,
+			principal: toNumber(loan.principal),
+			interestRate: toNumber(loan.interestRate),
+			termMonths: loan.termMonths ?? null,
+			status: loan.status,
+			issuedAt: loan.issuedAt,
+			dueDate: loan.dueDate,
+			notes: loan.notes,
+			createdAt: loan.createdAt,
+			balance: position.totalOutstanding,
+			totalPaid: position.totalPaid,
+			principalOutstanding: position.principalOutstanding,
+			interestOutstanding: position.interestOutstanding,
+			accruedInterest: position.accruedInterest
+		};
+	});
 
 	const loansSummary = {
 		items: loans,
@@ -175,17 +209,35 @@ export async function recordSavingsTransaction(
 		return { success: false, errors: { amount: ['Saldo tabungan tidak mencukupi'] } } as const;
 	}
 
-	await db.transaction(async (tx) => {
-		await tx.insert(savingsTransactions).values({
-			customerId,
-			type: data.type,
-			amount: data.amount.toString(),
-			note: data.note ? data.note : null,
-			reference: data.reference ? data.reference : null,
-			createdBy: options.userId ?? null,
-			createdAt: new Date()
+	const now = new Date();
+
+	try {
+		await db.transaction(async (tx) => {
+			await tx.insert(savingsTransactions).values({
+				customerId,
+				type: data.type,
+				amount: data.amount.toString(),
+				note: data.note ? data.note : null,
+				reference: data.reference ? data.reference : null,
+				createdBy: options.userId ?? null,
+				createdAt: now
+			});
+
+			await recordSavingsJournal(tx, {
+				amount: data.amount,
+				type: data.type,
+				entryDate: now,
+				reference: data.reference ?? `SAV-${customerId}`,
+				note: data.note ?? null,
+				createdBy: options.userId ?? null
+			});
 		});
-	});
+	} catch (error) {
+		if (error instanceof LedgerConfigurationError) {
+			return { success: false, errors: { root: [error.message] } } as const;
+		}
+		throw error;
+	}
 
 	return { success: true } as const;
 }
@@ -210,7 +262,8 @@ export async function payLoanFromSavings(
 		return { success: false, errors: { loanId: ['Pinjaman tidak dalam status aktif'] } } as const;
 	}
 
-	const currentBalance = toNumber(loan.balance);
+	const position = computeLoanPosition(loan);
+	const currentBalance = position.totalOutstanding;
 	if (currentBalance <= 0) {
 		return { success: false, errors: { loanId: ['Pinjaman sudah lunas'] } } as const;
 	}
@@ -225,40 +278,63 @@ export async function payLoanFromSavings(
 		return { success: false, errors: { balance: ['Saldo tabungan tidak mencukupi'] } } as const;
 	}
 
-	const remaining = Math.max(0, Number((currentBalance - amount).toFixed(2)));
+	let remainingAmount = amount;
+	const interestPayment = Math.min(remainingAmount, position.interestOutstanding);
+	remainingAmount -= interestPayment;
+	const principalPayment = Math.min(position.principalOutstanding, remainingAmount);
+	const nextInterestOutstanding = toCurrency(position.interestOutstanding - interestPayment);
+	const nextPrincipalOutstanding = toCurrency(position.principalOutstanding - principalPayment);
+	const remaining = toCurrency(nextPrincipalOutstanding + nextInterestOutstanding);
 	const nextStatus = remaining === 0 ? 'closed' : loan.status;
 
-	await db.transaction(async (tx) => {
-		const now = new Date();
-		await tx.insert(savingsTransactions).values({
-			customerId,
-			type: 'withdraw',
-			amount: amount.toString(),
-			note: `Pembayaran pinjaman ${loan.id.slice(0, 8).toUpperCase()} dari tabungan`,
-			reference: `LOAN-${loan.id.slice(0, 8).toUpperCase()}`,
-			createdBy: options.userId ?? null,
-			createdAt: now
-		});
+	const now = new Date();
 
-		await tx.insert(loanTransactions).values({
-			loanId: loan.id,
-			type: 'repayment',
-			amount: amount.toString(),
-			note: 'Pembayaran menggunakan tabungan anggota',
-			reference: `TABUNGAN-${loan.id.slice(0, 8).toUpperCase()}`,
-			createdBy: options.userId ?? null,
-			createdAt: now
-		});
+	try {
+		await db.transaction(async (tx) => {
+			await tx.insert(savingsTransactions).values({
+				customerId,
+				type: 'withdraw',
+				amount: amount.toString(),
+				note: `Pembayaran pinjaman ${loan.id.slice(0, 8).toUpperCase()} dari tabungan`,
+				reference: `LOAN-${loan.id.slice(0, 8).toUpperCase()}`,
+				createdBy: options.userId ?? null,
+				createdAt: now
+			});
 
-		await tx
-			.update(loanAccounts)
-			.set({
-				balance: remaining.toString(),
-				status: nextStatus,
-				updatedAt: now
-			})
-			.where(eq(loanAccounts.id, loan.id));
-	});
+			await tx.insert(loanTransactions).values({
+				loanId: loan.id,
+				type: 'repayment',
+				amount: amount.toString(),
+				note: 'Pembayaran menggunakan tabungan anggota',
+				reference: `TABUNGAN-${loan.id.slice(0, 8).toUpperCase()}`,
+				createdBy: options.userId ?? null,
+				createdAt: now
+			});
+
+			await tx
+				.update(loanAccounts)
+				.set({
+					balance: nextPrincipalOutstanding.toFixed(2),
+					status: nextStatus,
+					updatedAt: now
+				})
+				.where(eq(loanAccounts.id, loan.id));
+
+			await recordLoanRepaymentFromSavingsJournal(tx, {
+				total: amount,
+				principal: principalPayment,
+				interest: interestPayment,
+				entryDate: now,
+				reference: loan.id,
+				createdBy: options.userId ?? null
+			});
+		});
+	} catch (error) {
+		if (error instanceof LedgerConfigurationError) {
+			return { success: false, errors: { root: [error.message] } } as const;
+		}
+		throw error;
+	}
 
 	return { success: true } as const;
 }
@@ -277,36 +353,51 @@ export async function createLoanAccount(
 	const issuedAt = data.issuedAt ? new Date(data.issuedAt) : new Date();
 	const dueDate = data.dueDate ? new Date(data.dueDate) : null;
 
-	await db.transaction(async (tx) => {
-		const now = new Date();
-		const [loan] = await tx
-			.insert(loanAccounts)
-			.values({
-				customerId,
-				principal: data.principal.toString(),
-				balance: data.principal.toString(),
-				interestRate: data.interestRate.toString(),
-				termMonths: data.termMonths ?? null,
-				status: 'active',
-				issuedAt,
-				dueDate,
-				notes: data.notes ? data.notes : null,
-				createdBy: options.userId ?? null,
-				createdAt: now,
-				updatedAt: now
-			})
-			.returning({ id: loanAccounts.id });
+	const now = new Date();
 
-		await tx.insert(loanTransactions).values({
-			loanId: loan.id,
-			type: 'disbursement',
-			amount: data.principal.toString(),
-			note: data.notes ? `Pencairan: ${data.notes}` : 'Pencairan awal',
-			reference: data.reference ? data.reference : null,
-			createdBy: options.userId ?? null,
-			createdAt: now
+	try {
+		await db.transaction(async (tx) => {
+			const [loan] = await tx
+				.insert(loanAccounts)
+				.values({
+					customerId,
+					principal: data.principal.toString(),
+					balance: data.principal.toString(),
+					interestRate: data.interestRate.toString(),
+					termMonths: data.termMonths ?? null,
+					status: 'active',
+					issuedAt,
+					dueDate,
+					notes: data.notes ? data.notes : null,
+					createdBy: options.userId ?? null,
+					createdAt: now,
+					updatedAt: now
+				})
+				.returning({ id: loanAccounts.id });
+
+			await tx.insert(loanTransactions).values({
+				loanId: loan.id,
+				type: 'disbursement',
+				amount: data.principal.toString(),
+				note: data.notes ? `Pencairan: ${data.notes}` : 'Pencairan awal',
+				reference: data.reference ? data.reference : null,
+				createdBy: options.userId ?? null,
+				createdAt: now
+			});
+
+			await recordLoanDisbursementJournal(tx, {
+				amount: data.principal,
+				entryDate: issuedAt,
+				reference: loan.id,
+				createdBy: options.userId ?? null
+			});
 		});
-	});
+	} catch (error) {
+		if (error instanceof LedgerConfigurationError) {
+			return { success: false, errors: { root: [error.message] } } as const;
+		}
+		throw error;
+	}
 
 	return { success: true } as const;
 }
@@ -331,35 +422,59 @@ export async function recordLoanRepayment(
 		return { success: false, errors: { loanId: ['Pinjaman sudah lunas'] } } as const;
 	}
 
-	const currentBalance = toNumber(loan.balance);
+	const position = computeLoanPosition(loan);
+	const currentBalance = position.totalOutstanding;
 	if (data.amount > currentBalance) {
 		return { success: false, errors: { amount: ['Nominal melebihi sisa pinjaman'] } } as const;
 	}
 
-	const newBalance = Math.max(0, Number((currentBalance - data.amount).toFixed(2)));
+	let remainingAmount = data.amount;
+	const interestPayment = Math.min(remainingAmount, position.interestOutstanding);
+	remainingAmount -= interestPayment;
+	const principalPayment = Math.min(position.principalOutstanding, remainingAmount);
+	const nextInterestOutstanding = toCurrency(position.interestOutstanding - interestPayment);
+	const nextPrincipalOutstanding = toCurrency(position.principalOutstanding - principalPayment);
+	const newBalance = toCurrency(nextPrincipalOutstanding + nextInterestOutstanding);
 	const nextStatus = newBalance === 0 ? 'closed' : loan.status;
 
-	await db.transaction(async (tx) => {
-		const now = new Date();
-		await tx.insert(loanTransactions).values({
-			loanId: loan.id,
-			type: 'repayment',
-			amount: data.amount.toString(),
-			note: data.note ? data.note : null,
-			reference: data.reference ? data.reference : null,
-			createdBy: options.userId ?? null,
-			createdAt: now
-		});
+	const now = new Date();
 
-		await tx
-			.update(loanAccounts)
-			.set({
-				balance: newBalance.toString(),
-				status: nextStatus,
-				updatedAt: now
-			})
-			.where(eq(loanAccounts.id, loan.id));
-	});
+	try {
+		await db.transaction(async (tx) => {
+			await tx.insert(loanTransactions).values({
+				loanId: loan.id,
+				type: 'repayment',
+				amount: data.amount.toString(),
+				note: data.note ? data.note : null,
+				reference: data.reference ? data.reference : null,
+				createdBy: options.userId ?? null,
+				createdAt: now
+			});
+
+			await tx
+				.update(loanAccounts)
+				.set({
+					balance: nextPrincipalOutstanding.toFixed(2),
+					status: nextStatus,
+					updatedAt: now
+				})
+				.where(eq(loanAccounts.id, loan.id));
+
+			await recordLoanRepaymentJournal(tx, {
+				total: data.amount,
+				principal: principalPayment,
+				interest: interestPayment,
+				entryDate: now,
+				reference: loan.id,
+				createdBy: options.userId ?? null
+			});
+		});
+	} catch (error) {
+		if (error instanceof LedgerConfigurationError) {
+			return { success: false, errors: { root: [error.message] } } as const;
+		}
+		throw error;
+	}
 
 	return { success: true } as const;
 }
@@ -430,28 +545,43 @@ export async function payOutstandingWithSavings(
 	const remaining = Math.max(0, Number((outstanding - amount).toFixed(2)));
 	const nextStatus = remaining === 0 ? 'paid' : 'pending';
 
-	await db.transaction(async (tx) => {
-		const now = new Date();
-		await tx.insert(savingsTransactions).values({
-			customerId,
-			type: 'withdraw',
-			amount: amount.toString(),
-			note: `Pembayaran piutang ${payment.transactionNumber}`,
-			reference: `PIUTANG-${payment.transactionNumber}`,
-			createdBy: options.userId ?? null,
-			createdAt: now
-		});
+	const now = new Date();
 
-		await tx
-			.update(payments)
-			.set({
-				amount: remaining.toString(),
-				status: nextStatus,
-				...(nextStatus === 'paid' ? { paidAt: now } : {}),
-				updatedAt: now
-			})
-			.where(eq(payments.id, payment.paymentId));
-	});
+	try {
+		await db.transaction(async (tx) => {
+			await tx.insert(savingsTransactions).values({
+				customerId,
+				type: 'withdraw',
+				amount: amount.toString(),
+				note: `Pembayaran piutang ${payment.transactionNumber}`,
+				reference: `PIUTANG-${payment.transactionNumber}`,
+				createdBy: options.userId ?? null,
+				createdAt: now
+			});
+
+			await tx
+				.update(payments)
+				.set({
+					amount: remaining.toString(),
+					status: nextStatus,
+					...(nextStatus === 'paid' ? { paidAt: now } : {}),
+					updatedAt: now
+				})
+				.where(eq(payments.id, payment.paymentId));
+
+			await recordSavingsToReceivableJournal(tx, {
+				amount,
+				entryDate: now,
+				reference: transactionId,
+				createdBy: options.userId ?? null
+			});
+		});
+	} catch (error) {
+		if (error instanceof LedgerConfigurationError) {
+			return { success: false, errors: { root: [error.message] } } as const;
+		}
+		throw error;
+	}
 
 	return { success: true } as const;
 }

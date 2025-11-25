@@ -2,7 +2,7 @@ import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { z } from 'zod';
 import { asc, eq } from 'drizzle-orm';
-import { randomUUID } from 'node:crypto';
+import { randomUUID } from 'crypto';
 import { hash } from '@node-rs/argon2';
 
 import { db } from '$lib/db/client';

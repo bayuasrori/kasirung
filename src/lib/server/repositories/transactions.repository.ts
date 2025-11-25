@@ -9,11 +9,14 @@ import {
 } from '$lib/db/schema';
 import { and, asc, desc, eq, gte, ilike, isNotNull, lte, or, sql, sum } from 'drizzle-orm';
 
+type DBTransaction = Parameters<Parameters<DB['transaction']>[0]>[0];
+
 export async function createTransactionRecord(
 	dbClient: DB,
 	values: typeof transactions.$inferInsert,
 	items: Array<typeof transactionItems.$inferInsert>,
-	payment: typeof payments.$inferInsert
+	payment: typeof payments.$inferInsert,
+	options: { afterInsert?: (tx: DBTransaction, context: { transactionId: string }) => Promise<void> } = {}
 ) {
 	return dbClient.transaction(async (tx) => {
 		const [createdTransaction] = await tx
@@ -23,6 +26,10 @@ export async function createTransactionRecord(
 
 		await tx.insert(transactionItems).values(items);
 		await tx.insert(payments).values(payment);
+
+		if (options.afterInsert) {
+			await options.afterInsert(tx, { transactionId: createdTransaction.id });
+		}
 
 		return createdTransaction;
 	});

@@ -78,6 +78,62 @@ CREATE TABLE IF NOT EXISTS customers (
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+DO $$
+BEGIN
+	IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'kosan_room_status') THEN
+		CREATE TYPE kosan_room_status AS ENUM ('kosong', 'terisi');
+	END IF;
+END $$;
+
+DO $$
+BEGIN
+	IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'kosan_tenant_status') THEN
+		CREATE TYPE kosan_tenant_status AS ENUM ('aktif', 'keluar');
+	END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS gedung_kosan (
+	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+	nama_gedung TEXT NOT NULL,
+	alamat TEXT NOT NULL,
+	keterangan TEXT,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS ruangan_kosan (
+	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+	gedung_id UUID NOT NULL REFERENCES gedung_kosan(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+	nama_ruangan TEXT NOT NULL,
+	lantai TEXT,
+	kapasitas INTEGER NOT NULL DEFAULT 1,
+	status kosan_room_status NOT NULL DEFAULT 'kosong',
+	harga_bulanan NUMERIC(12, 2) NOT NULL,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ruangan_kosan_gedung_idx ON ruangan_kosan (gedung_id);
+CREATE INDEX IF NOT EXISTS ruangan_kosan_status_idx ON ruangan_kosan (status);
+
+CREATE TABLE IF NOT EXISTS penghuni_kosan (
+	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+	pelanggan_id UUID NOT NULL REFERENCES customers(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+	gedung_id UUID NOT NULL REFERENCES gedung_kosan(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+	ruangan_id UUID NOT NULL REFERENCES ruangan_kosan(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+	tanggal_masuk DATE NOT NULL,
+	tanggal_keluar DATE,
+	status kosan_tenant_status NOT NULL DEFAULT 'aktif',
+	catatan TEXT,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS penghuni_kosan_pelanggan_idx ON penghuni_kosan (pelanggan_id);
+CREATE INDEX IF NOT EXISTS penghuni_kosan_ruangan_idx ON penghuni_kosan (ruangan_id);
+CREATE INDEX IF NOT EXISTS penghuni_kosan_status_idx ON penghuni_kosan (status);
+CREATE INDEX IF NOT EXISTS penghuni_kosan_gedung_idx ON penghuni_kosan (gedung_id);
+
 CREATE TABLE IF NOT EXISTS transactions (
 	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 	number TEXT NOT NULL UNIQUE,

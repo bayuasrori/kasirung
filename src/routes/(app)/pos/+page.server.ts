@@ -5,6 +5,7 @@ import { listActiveProducts } from '$lib/server/services/products.service';
 import { listAllCategories } from '$lib/server/repositories/categories.repository';
 import { createPosTransaction } from '$lib/server/services/pos.service';
 import { listQuickCustomers } from '$lib/server/services/customers.service';
+import { listPenghuniAktifLookup } from '$lib/server/services/kosan-penghuni.service';
 
 export const load: PageServerLoad = async ({ url }) => {
 	const categoryParam = url.searchParams.get('category');
@@ -20,16 +21,18 @@ export const load: PageServerLoad = async ({ url }) => {
 		categoryId = Number.isNaN(parsed) ? undefined : parsed;
 	}
 
-	const [products, categories, customers] = await Promise.all([
+	const [products, categories, customers, tenants] = await Promise.all([
 		listActiveProducts(categoryId),
 		listAllCategories(),
-		listQuickCustomers()
+		listQuickCustomers(),
+		listPenghuniAktifLookup()
 	]);
 
 	return {
 		products,
 		categories,
 		customers,
+		tenants,
 		success,
 		receipt,
 		filters: { category: categoryParam ?? '' }

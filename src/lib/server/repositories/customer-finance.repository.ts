@@ -50,13 +50,28 @@ export async function listLoanAccountsByCustomer(customerId: string) {
 			dueDate: loanAccounts.dueDate,
 			notes: loanAccounts.notes,
 			createdAt: loanAccounts.createdAt,
-			totalPaid: sql<string>`coalesce(sum(case when ${loanTransactions.type} = 'repayment' then ${loanTransactions.amount} else 0 end), 0)`
+			totalPaid: sql<string>`coalesce(sum(case when ${loanTransactions.type} = 'repayment' then ${loanTransactions.amount} else 0 end), 0)`,
+			interestAccrued: sql<string>`coalesce(sum(case when ${loanTransactions.type} = 'interest' then ${loanTransactions.amount} else 0 end), 0)`
 		})
 		.from(loanAccounts)
 		.leftJoin(loanTransactions, eq(loanTransactions.loanId, loanAccounts.id))
 		.where(eq(loanAccounts.customerId, customerId))
-		.groupBy(loanAccounts.id)
-		.orderBy(desc(loanAccounts.createdAt));
+		.groupBy(
+			loanAccounts.id,
+			loanAccounts.principal,
+			loanAccounts.balance,
+			loanAccounts.interestRate,
+			loanAccounts.termMonths,
+			loanAccounts.status,
+			loanAccounts.issuedAt,
+			loanAccounts.dueDate,
+			loanAccounts.notes,
+			loanAccounts.createdAt
+		)
+		.orderBy(
+			sql`case when ${loanAccounts.status} = 'active' then 0 when ${loanAccounts.status} = 'defaulted' then 1 else 2 end`,
+			desc(loanAccounts.createdAt)
+		);
 }
 
 export async function listRecentLoanTransactions(customerId: string, limit = defaultListLimit) {
@@ -89,10 +104,25 @@ export async function findLoanAccountById(loanId: string) {
 			termMonths: loanAccounts.termMonths,
 			issuedAt: loanAccounts.issuedAt,
 			dueDate: loanAccounts.dueDate,
-			notes: loanAccounts.notes
+			notes: loanAccounts.notes,
+			totalPaid: sql<string>`coalesce(sum(case when ${loanTransactions.type} = 'repayment' then ${loanTransactions.amount} else 0 end), 0)`,
+			interestAccrued: sql<string>`coalesce(sum(case when ${loanTransactions.type} = 'interest' then ${loanTransactions.amount} else 0 end), 0)`
 		})
 		.from(loanAccounts)
+		.leftJoin(loanTransactions, eq(loanTransactions.loanId, loanAccounts.id))
 		.where(eq(loanAccounts.id, loanId))
+		.groupBy(
+			loanAccounts.id,
+			loanAccounts.customerId,
+			loanAccounts.principal,
+			loanAccounts.balance,
+			loanAccounts.status,
+			loanAccounts.interestRate,
+			loanAccounts.termMonths,
+			loanAccounts.issuedAt,
+			loanAccounts.dueDate,
+			loanAccounts.notes
+		)
 		.limit(1);
 
 	return loan ?? null;

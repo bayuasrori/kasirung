@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { LayoutDashboard, Package, ShoppingBag, BarChart3, LogOut, History } from 'lucide-svelte';
+	import { LayoutDashboard, Package, ShoppingBag, BarChart3, LogOut, History, Settings, User, ChevronDown } from 'lucide-svelte';
+	import { slide } from 'svelte/transition';
 
 	import Button from '$lib/components/ui/button.svelte';
 	import Avatar from '$lib/components/ui/avatar.svelte';
 	import Badge from '$lib/components/ui/badge.svelte';
+	import Dropdown from '$lib/components/ui/dropdown.svelte';
+	import MenuItem from '$lib/components/ui/menu-item.svelte';
 	import {
 		MENU_KEYS,
 		NAVIGATION_TREE,
@@ -52,6 +55,35 @@
 	$: menuItems = buildMenu(allowedMenus);
 
 	let sidebarOpen = false;
+	
+	// Track which menu sections are expanded
+	let expandedSections: Record<string, boolean> = {};
+	
+	// Initialize expanded sections based on current path
+	$: {
+		menuItems.forEach((item) => {
+			if (item.children && item.name) {
+				const isAnyChildActive = item.children.some((child) => 
+					isActive(child.href, $page.url.pathname)
+				);
+				if (isAnyChildActive && !(item.name in expandedSections)) {
+					expandedSections[item.name] = true;
+				} else if (!(item.name in expandedSections)) {
+					expandedSections[item.name] = false;
+				}
+			}
+		});
+	}
+
+	function toggleSection(sectionName: string) {
+		const isOpen = expandedSections[sectionName];
+		// Close all sections
+		for (const key in expandedSections) {
+			expandedSections[key] = false;
+		}
+		// If it wasn't open, open it. If it was open, it stays closed.
+		expandedSections[sectionName] = !isOpen;
+	}
 
 	function isActive(path: string, current: string) {
 		if (path === '/master' || path === '/manajemen') {
@@ -95,21 +127,31 @@
 					</div>
 				</a>
 				<nav class="mt-10 space-y-2 text-sm">
-					{#each menuItems as item}
+					{#each menuItems as item (item.href ?? item.name)}
 						{#if item.children}
 							<div class="space-y-1">
-								<p class="px-3 text-xs font-semibold tracking-wide text-slate-400 uppercase">
-									{item.name}
-								</p>
-								{#each item.children as child}
-									<a
-										href={child.href}
-										class={`flex items-center justify-between rounded-xl px-3 py-2 transition ${isActive(child.href, $page.url.pathname) ? 'bg-blue-50 text-blue-600' : 'text-slate-600 hover:bg-slate-100'}`}
-										on:click={closeSidebar}
-									>
-										<span>{child.name}</span>
-									</a>
-								{/each}
+								<button
+									class="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold tracking-wide text-slate-600 hover:bg-slate-100 rounded-xl transition"
+									on:click={() => toggleSection(item.name)}
+								>
+									<span class="uppercase">{item.name}</span>
+									<ChevronDown 
+										class={`h-4 w-4 transition-transform duration-200 ${expandedSections[item.name] ? 'rotate-180' : ''}`} 
+									/>
+								</button>
+								{#if expandedSections[item.name]}
+									<div transition:slide={{ duration: 200 }} class="space-y-1 pl-2">
+										{#each item.children as child (child.key ?? child.href)}
+											<a
+												href={child.href}
+												class={`flex items-center justify-between rounded-xl px-3 py-2 transition ${isActive(child.href, $page.url.pathname) ? 'bg-blue-50 text-blue-600 font-medium' : 'text-slate-600 hover:bg-slate-100'}`}
+												on:click={closeSidebar}
+											>
+												<span>{child.name}</span>
+											</a>
+										{/each}
+									</div>
+								{/if}
 							</div>
 						{:else}
 							<a
@@ -152,20 +194,30 @@
 			</a>
 
 			<nav class="mt-10 space-y-2 text-sm">
-				{#each menuItems as item}
+				{#each menuItems as item (item.href ?? item.name)}
 					{#if item.children}
 						<div class="space-y-1">
-							<p class="px-3 text-xs font-semibold tracking-wide text-slate-400 uppercase">
-								{item.name}
-							</p>
-							{#each item.children as child}
-								<a
-									href={child.href}
-									class={`flex items-center justify-between rounded-xl px-3 py-2 transition ${isActive(child.href, $page.url.pathname) ? 'bg-blue-50 text-blue-600' : 'text-slate-600 hover:bg-slate-100'}`}
-								>
-									<span>{child.name}</span>
-								</a>
-							{/each}
+							<button
+								class="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold tracking-wide text-slate-600 hover:bg-slate-100 rounded-xl transition"
+								on:click={() => toggleSection(item.name)}
+							>
+								<span class="uppercase">{item.name}</span>
+								<ChevronDown 
+									class={`h-4 w-4 transition-transform duration-200 ${expandedSections[item.name] ? 'rotate-180' : ''}`} 
+								/>
+							</button>
+							{#if expandedSections[item.name]}
+								<div transition:slide={{ duration: 200 }} class="space-y-1 pl-2">
+									{#each item.children as child (child.key ?? child.href)}
+										<a
+											href={child.href}
+											class={`flex items-center justify-between rounded-xl px-3 py-2 transition ${isActive(child.href, $page.url.pathname) ? 'bg-blue-50 text-blue-600 font-medium' : 'text-slate-600 hover:bg-slate-100'}`}
+										>
+											<span>{child.name}</span>
+										</a>
+									{/each}
+								</div>
+							{/if}
 						</div>
 					{:else}
 						<a
@@ -209,7 +261,35 @@
 					</div>
 					<div class="flex items-center gap-3">
 						<Badge variant="muted">Versi Beta</Badge>
-						<Avatar name={data.user?.fullName ?? 'User'} email={data.user?.email ?? ''} />
+						<Dropdown>
+							<div slot="trigger" class="cursor-pointer">
+								<Avatar name={data.user?.fullName ?? 'User'} email={data.user?.email ?? ''} />
+							</div>
+							<div slot="content">
+								<div class="border-b border-slate-200 pb-2 mb-1">
+									<div class="px-3 py-1">
+										<p class="text-sm font-medium text-slate-900">{data.user?.fullName ?? 'User'}</p>
+										<p class="text-xs text-slate-500">{data.user?.email ?? ''}</p>
+									</div>
+								</div>
+								<MenuItem href="/akun" icon="<User class='h-4 w-4'/>">
+									Pengaturan Akun
+								</MenuItem>
+								<MenuItem 
+									onClick={() => {
+										const form = document.createElement('form');
+										form.method = 'POST';
+										form.action = '/logout';
+										document.body.appendChild(form);
+										form.submit();
+									}}
+									icon="<LogOut class='h-4 w-4'/>"
+									danger
+								>
+									Keluar
+								</MenuItem>
+							</div>
+						</Dropdown>
 					</div>
 				</div>
 			</header>

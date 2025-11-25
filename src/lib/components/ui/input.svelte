@@ -13,4 +13,18 @@
 	);
 </script>
 
-<input {type} bind:value {disabled} class={computedClass} {...$$restProps} />
+<input
+	{type}
+	bind:value
+	{disabled}
+	class={computedClass}
+	{...$$restProps}
+	on:click
+	on:keydown
+	on:keyup
+	on:keypress
+	on:change
+	on:input
+	on:focus
+	on:blur
+/>

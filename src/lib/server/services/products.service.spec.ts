@@ -19,7 +19,7 @@ const randomUUIDMock = vi.hoisted(() => vi.fn(() => 'test-uuid'));
 
 vi.mock('$lib/server/repositories/categories.repository', () => categoryRepoMocks);
 
-vi.mock('node:crypto', () => ({
+vi.mock('crypto', () => ({
 	randomUUID: randomUUIDMock
 }));
 
